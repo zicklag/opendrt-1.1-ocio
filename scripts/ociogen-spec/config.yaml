@@ -1,0 +1,51 @@
+# ociogen-spec/config.yaml — the minimal spec we run through Jed Smith's
+# ociogen to produce, reproducibly from his colorimetry definitions:
+#   * oetf_filmlight_tloge_to_linear.spi1d (the T-LogE shaper transfer),
+#   * the XYZ(D65) -> FilmLight E-Gamut 2 gamut matrix.
+#
+# Both are consumed by scripts/30-build-config.py when assembling the
+# Blender drop-in config; the generated .ocio itself is reference material.
+# Compared to Jed's default config.yaml this only narrows the active
+# colorspace list and drops unused roles — the colorimetry comes straight
+# from the ociogen colorspaces.yaml shipped in this workspace.
+
+settings:
+  config_name: opendrt-ociogen-reference
+  config_description: "ociogen reference build for the OpenDRT bake workspace."
+  ocio_version_major: 2
+  config_location: build/ociogen
+  enable_descriptions: false
+  enable_builtins: false
+  enable_colorspace_encoding: false
+  enable_colorspace_aliases: false
+  # 2^13 = 8192 samples, matching Jed's shipped spi1d exports exactly.
+  spi1d_lut_precision: 13
+  reference_colorspace: &ref_lin filmlight-egamut2-lin
+  reference_log_colorspace: &ref_log filmlight-egamut2-tloge
+  category_folder_names:
+    - work: Working Spaces
+    - camera: Camera Spaces
+    - display: Display Spaces
+    - image: Image Formation
+  view_transform_settings:
+    # Our baked cubes use Jed's {view}__{shaper}_to_{display} naming, so
+    lut_search_path: build/luts
+    lut_filename_pattern: "{viewName}__{shaperSpace}_to_{displaySpace}"
+  view_mutate:
+    rec1886:
+      - srgb-display
+
+roles:
+  scene_linear: *ref_lin
+  # ociogen's default file rule references the `default` role; give it one.
+  default: *ref_lin
+active_colorspaces:
+  # xyz-d65 is the matrix carrier: ociogen renders the XYZ(D65) <->
+  # E-Gamut 2 gamut matrix into that colorspace's transforms, and
+  # 30-build-config.py copies it from there.
+  - bypass
+  - xyz-d65
+  - filmlight-egamut2-lin
+  - filmlight-egamut2-tloge
+  - rec709-lin
+  - rec1886

@@ -1,0 +1,49 @@
+# OpenDRT 1.1 -> OCIO bake workspace
+#
+# Everything the build needs lives in this isolated pixi environment:
+# compilers and python resolved by pixi.lock, so LUTs baked on this
+# machine today bake identically next year.
+#
+# Usage:
+#   pixi install        solve + create .pixi env from this file
+#   pixi run dist       fetch artifacts -> bake LUTs -> assemble config -> validate
+#   pixi run validate   re-run only the validation suite
+#   pixi run clean      remove build/, dist/, external/
+
+[project]
+authors = ["Zicklag"]
+channels = ["conda-forge"]
+description = "Bake OpenDRT v1.1.0 into OCIO LUTs and assemble a Blender 5.2 drop-in config"
+name = "opendrt-1.1-ocio-workspace"
+platforms = ["linux-64"]
+version = "0.1.0"
+
+[dependencies]
+# Compiles the vendored OpenDRT DCTL (C++-flavored source; the host cc1plus
+# is blocked in this agent's sandbox, so compile with the pixi env's g++).
+gcc = ">=13"
+gxx = ">=13"
+pip = ">=24"
+# Pinned: PyOpenColorIO wheels exist on PyPI only as source builds; the
+# conda-forge binding builds are precompiled and match this interpreter.
+python = "3.12.*"
+py-opencolorio = ">=2.4"
+opencolorio = ">=2.4"
+
+[pypi-dependencies]
+# LUT math, .cube writing, and check-image rendering.
+numpy = "*"
+pillow = "*"
+pyyaml = "*"
+
+[tasks]
+clean = "rm -rf build dist"
+fetch = { cmd = "bash scripts/10-fetch-artifacts.sh" }
+bake = { cmd = "python scripts/20-bake-luts.py" }
+config = { cmd = "python scripts/30-build-config.py" }
+validate = { cmd = "python scripts/40-validate.py" }
+# Jed's own generator: regenerate the T-LogE spi1d + gamut matrix the
+# Blender config assembly consumes, straight from his colorspaces.yaml.
+ociogen-ref = { cmd = "ociogen run --config scripts/ociogen-spec/config.yaml" }
+# The one command to make everything from scratch:
+dist = { depends-on = ["clean", "fetch", "bake", "config", "validate"] }
