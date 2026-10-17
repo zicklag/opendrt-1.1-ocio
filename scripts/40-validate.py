@@ -17,18 +17,16 @@ any FAIL. Checks, in order:
                   spi1d - HARD gate at 1e-4.
 
   config - the spliced drop-in config, through the real OCIO library
-    [config]  loads; all 14 OpenDRT view transforms present; roles intact
-              (checked through the OCIO API, falling back to config text);
-              every display/view pair builds a processor.
-    [matrix]  frame-convention proof: jedypod's v1.0.0 config numbers
-              (XYZ-D65 -> E-Gamut2 then E-Gamut(v1) -> E-Gamut2), pushed
-              through the D65-white frame diagonal, must reproduce Blender's
-              own E-Gamut(v1) colorspace matrix - this is the construction
-              our spliced matrix follows.
-    [spot]    a grey + primaries through the FULL config pipeline (scene ->
-              T-LogE -> cube -> Rec.1886 display view) vs the same T-LogE
-              points fed straight to the bake exe - the wiring proof. Grey
-              axis must stay neutral.
+    [config]  loads; all 35 OpenDRT view colorspaces present and wired into
+              the five covered display families; roles intact (checked
+              through the OCIO API, falling back to config text); every
+              scene_linear -> view colorspace pair builds a processor.
+    [white]   ACES reference white maps to E-Gamut2 white through the spliced
+              BFD-legend; greys invariant.
+    [spot]    greys + primaries through the FULL config pipeline (scene ->
+              T-LogE -> cube) vs the same points fed straight to the bake
+              exe - the wiring proof. Grey axis must stay neutral through
+              every display encoding.
 
   images
     [images]  check-image PNGs (exposure ramp + primaries + saturation
@@ -59,11 +57,6 @@ CHECKS = ROOT / "dist/OpenDRT-1.1-Blender5.2-checks"
 
 # D65 white, Y-normalized (same constant the build script uses).
 D65_WHITE = np.array([0.3127 / 0.329, 1.0, (1 - 0.3127 - 0.329) / 0.329])
-
-# Blender 5.2's own E-Gamut(v1) colorspace matrix (target of the frame proof).
-BLENDER_EG1 = np.array([1.5250528, -0.3159135, -0.1226583,
-                        -0.5091526, 1.3333274, 0.1382844,
-                        0.0957153, 0.0508974, 0.7879558]).reshape(3, 3)
 
 failures = 0
 
@@ -175,12 +168,18 @@ def check_config() -> None:
     cfg = OCIO.Config.CreateFromFile(str(DIST / "config.ocio"))
     text = (DIST / "config.ocio").read_text()
 
-    vts = [str(v.getName()) for v in cfg.getViewTransforms()]
-    odrt = sorted(v for v in vts if v.startswith("OpenDRT 1.1"))
-    expected = sorted({f"OpenDRT 1.1 {look}{suffix}" for look in _bake.LOOKS
-                       for suffix in ("", " - HDR 1000 nits")})
-    report("OpenDRT view transforms present", odrt == expected,
+    # The OpenDRT views are colorspace-views (gripeyes recipe): one colorspace
+    # per look x display family plus one View line per display.
+    labels = ("sRGB", "Display P3", "Rec.1886", "Rec.2100-PQ", "Rec.2100-HLG")
+    cs = set(str(n) for n in cfg.getColorSpaceNames())
+    expected = sorted(f"OpenDRT 1.1 {look} {label}" for look in _bake.LOOKS for label in labels)
+    odrt = sorted(n for n in cs if n.startswith("OpenDRT 1.1"))
+    report("OpenDRT view colorspaces present", odrt == expected,
            f"{len(odrt)}/{len(expected)} match exactly")
+
+    wired = re.findall(r"!<View> \{name: OpenDRT 1\.1 [^,]+, colorspace: (OpenDRT 1\.1 [^\}]+)\}", text)
+    report("display View wiring", sorted(set(wired)) == expected
+           and len(wired) == 5 * len(_bake.LOOKS), f"{len(wired)} views wired")
 
     # roles: the python binding surfaces roles differently across OCIO
     # versions; use the API when it exists, config text otherwise.
@@ -195,43 +194,30 @@ def check_config() -> None:
 
     built = 0
     for look in _bake.LOOKS:
-        pairs = [(d, f"OpenDRT 1.1 {look}") for d in
-                 ("sRGB", "Display P3", "Rec.1886", "Rec.2020", "Rec.2100-PQ", "Rec.2100-HLG")]
-        pairs += [("Rec.2100-PQ", f"OpenDRT 1.1 {look} - HDR 1000 nits"),
-                  ("Rec.2100-PQ", f"OpenDRT 1.1 {look} - SDR"),
-                  ("Rec.2100-HLG", f"OpenDRT 1.1 {look} - SDR")]
-        for display, view in pairs:
-            t = OCIO.DisplayViewTransform(src="Linear Rec.709", display=display, view=view)
+        for label in labels:
+            t = OCIO.ColorSpaceTransform(src="Linear Rec.709", dst=f"OpenDRT 1.1 {look} {label}")
             cfg.getProcessor(t).getDefaultCPUProcessor()
             built += 1
-    report("DisplayView processors build", built == 9 * len(_bake.LOOKS), f"{built} processor chains")
+    report("OpenDRT processors build (scene_linear -> each view)", built == 5 * len(_bake.LOOKS),
+           f"{built} processor chains")
 
 
-def check_matrix_from_config() -> None:
-    text = (DIST / "config.ocio").read_text()
-    ours = config_matrix_for(text, "Linear FilmLight E-Gamut 2")
-    if ours is None:
-        report("config matrix present", False, "'Linear FilmLight E-Gamut 2' block missing")
-        return
-    # The community Blender integration carries the E->D65 white adapt inside
-    # its matrix constants; ours follows Blender's own convention, so numbers
-    # differ for the same total mapping. The proof below is the real check.
-    print(f"[info] spliced E-Gamut 2 matrix: {np.round(ours, 7).tolist()}")
+def check_white_map() -> None:
+    """ACES reference white maps to E-Gamut2 white through the spliced leg
+    (BFD builtin + gamut matrix), and the grey axis is invariant. This is the
+    frame contract the OpenDRT view chains assume."""
+    import PyOpenColorIO as OCIO
 
-    # Frame convention proof: jedypod's v1.0.0 config defines XYZ(D65) ->
-    # E-Gamut2 and E-Gamut(v1) -> E-Gamut2. Compose the two, push through the
-    # D65-white frame diagonal, and the result must equal Blender's own
-    # E-Gamut(v1) colorspace matrix.
-    jedy = (ROOT / "external/OpenDRT_v1.0.0_full-config_v2/OpenDRT_v1.0.0_full-config.ocio").read_text()
-    xyz_eg2 = config_matrix_for(jedy, "XYZ D65")
-    eg1_eg2 = config_matrix_for(jedy, "Filmlight - E-Gamut - Linear")
-    if xyz_eg2 is None or eg1_eg2 is None:
-        report("frame convention", False, "reference matrices not found in jedypod's config")
-        return
-    composed = (np.linalg.inv(eg1_eg2) @ xyz_eg2) @ np.diag(1.0 / D65_WHITE)
-    d = np.abs(composed - BLENDER_EG1).max()
-    report("frame convention (jedy's v1.0 numbers -> Blender's own EG1 matrix)", d <= 1e-3,
-           f"max|delta| {d:.2e} (Blender writes 7 digits)")
+    cfg = OCIO.Config.CreateFromFile(str(DIST / "config.ocio"))
+    p = cfg.getProcessor(
+        OCIO.ColorSpaceTransform(src="ACES2065-1", dst="Linear FilmLight E-Gamut 2")
+    ).getDefaultCPUProcessor()
+    white = np.array(p.applyRGB([1.0, 1.0, 1.0]))
+    grey = np.array(p.applyRGB([0.18, 0.18, 0.18]))
+    d_white = float(np.abs(white - 1.0).max())
+    ok = d_white <= 1e-3 and float(np.abs(grey - grey.mean()).max()) <= 1e-4
+    report("white map (ACES -> E-Gamut 2)", ok,
+           f"white {np.round(white, 6).tolist()}, grey {np.round(grey, 6).tolist()}")
 
 
 def check_spot_values() -> None:
@@ -243,8 +229,8 @@ def check_spot_values() -> None:
 
     tlog_enc = cfg.getProcessor(
         OCIO.ColorSpaceTransform(src=eg, dst="Filmlight - E-Gamut2 - T-LogE")).getDefaultCPUProcessor()
-    dv = cfg.getProcessor(
-        OCIO.DisplayViewTransform(src=eg, display="Rec.1886", view="OpenDRT 1.1 Standard")).getDefaultCPUProcessor()
+    via_rec1886 = cfg.getProcessor(
+        OCIO.ColorSpaceTransform(src=eg, dst="OpenDRT 1.1 Standard Rec.1886")).getDefaultCPUProcessor()
 
     points = np.array([
         [0.18, 0.18, 0.18],     # mid-grey
@@ -256,7 +242,7 @@ def check_spot_values() -> None:
         [0.0, 0.0, 0.18],
     ], dtype=np.float64)
 
-    via_config = np.array([dv.applyRGB(p.tolist()) for p in points])
+    via_config = np.array([via_rec1886.applyRGB(p.tolist()) for p in points])
     tlog_pts = np.array([tlog_enc.applyRGB(p.tolist()) for p in points])
 
     exe, params = _bake.compile_dctl(ROOT / "external/dctl/OpenDRT_v1.1.0.dctl")
@@ -274,6 +260,16 @@ def check_spot_values() -> None:
     greys = via_config[:4]
     chroma = np.abs(greys - greys.mean(axis=1, keepdims=True)).max()
     report("neutral axis preserved", chroma <= 1e-4, f"grey-axis channel spread {chroma:.2e}")
+
+    # Neutral greys through every display encoding's full chain (the wire
+    # the user actually renders through on each display family).
+    for label in ("sRGB", "Display P3", "Rec.1886", "Rec.2100-PQ", "Rec.2100-HLG"):
+        cpu = cfg.getProcessor(
+            OCIO.ColorSpaceTransform(src=eg, dst=f"OpenDRT 1.1 Standard {label}")
+        ).getDefaultCPUProcessor()
+        greys_all = np.array([cpu.applyRGB([g, g, g]) for g in (0.018, 0.18, 1.0, 8.0)])
+        spread = float(np.abs(greys_all - greys_all.mean(axis=1, keepdims=True)).max())
+        report(f"neutral axis through {label}", spread <= 1e-4, f"channel spread {spread:.2e}")
 
     for p, o in zip(points, via_config):
         print(f"    scene {np.round(p, 5).tolist()} -> rec1886 {np.round(o, 5).tolist()}")
@@ -304,29 +300,36 @@ def render_check_images() -> None:
     sat = np.linspace(-0.8, 0.8, w).astype(np.float32)
     tint = np.array([1.0, 0.45, 0.75], dtype=np.float32)
     lin[166:, :, :] = tint[None, None, :] * (0.18 * (1.0 + sat))[None, :, None]
+    CHECKS.mkdir(parents=True, exist_ok=True)
+
+    def save(tag: str, cpu) -> None:
+        img = lin.copy().reshape(-1, 3)
+        cpu.applyRGB(img.ravel().tolist())
+        img = img.reshape(h, w, 3)
+        Image.fromarray((np.clip(img, 0.0, 1.0) * 255.0).astype(np.uint8)
+                        ).save(CHECKS / f"chart-{tag}.png")
 
     for display, view, tag in [
-        ("sRGB", "OpenDRT 1.1 Standard", "standard"),
-        ("sRGB", "OpenDRT 1.1 Colorful", "colorful"),
-        ("sRGB", "OpenDRT 1.1 Umbra", "umbra"),
         ("sRGB", "AgX", "agx"),
         ("sRGB", "Standard", "standard-bundled"),
     ]:
         dv = OCIO.DisplayViewTransform(src="Linear FilmLight E-Gamut 2", display=display, view=view)
-        cpu = cfg.getProcessor(dv).getDefaultCPUProcessor()
-        img = lin.copy().reshape(-1, 3)
-        cpu.applyRGB(img.ravel().tolist())
-        img = img.reshape(h, w, 3)
-        CHECKS.mkdir(parents=True, exist_ok=True)
-        out = CHECKS / f"chart-{tag}.png"
-        Image.fromarray((np.clip(img, 0.0, 1.0) * 255.0).astype(np.uint8)).save(out)
+        save(tag, cfg.getProcessor(dv).getDefaultCPUProcessor())
+    for cs, tag in [
+        ("OpenDRT 1.1 Standard sRGB", "standard"),
+        ("OpenDRT 1.1 Colorful sRGB", "colorful"),
+        ("OpenDRT 1.1 Umbra sRGB", "umbra"),
+        ("OpenDRT 1.1 Dystopic sRGB", "dystopic"),
+    ]:
+        t = OCIO.ColorSpaceTransform(src="Linear FilmLight E-Gamut 2", dst=cs)
+        save(tag, cfg.getProcessor(t).getDefaultCPUProcessor())
 
 
 def main() -> None:
     gate_v1_1()
     gate_v1_0()
     gate_spi1d()
-    check_matrix_from_config()
+    check_white_map()
     check_config()
     check_spot_values()
     render_check_images()

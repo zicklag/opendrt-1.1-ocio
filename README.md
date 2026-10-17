@@ -43,13 +43,16 @@ Blender's bundled 5.2 config, otherwise untouched, plus:
 
 - scene-side colorspaces `Linear FilmLight E-Gamut 2` and
   `Filmlight - E-Gamut2 - T-LogE` (the log shaper of the cubes),
-- 14 view transforms: the 7 looks (Standard, Arriba, Sylvan, Colorful, Aery,
-  Dystopic, Umbra) as Rec.1886 (2.4-power) cubes, plus the same 7 as
-  Rec.2100-PQ cubes baked at 1000 nits,
-- per-display views: every SDR display (sRGB, Display P3, Rec.1886, Rec.2020;
-  the display colorspace finishes the encoding, as with AgX), PQ views named
-  `- HDR 1000 nits` (Blender's mastering-metadata convention) plus `- SDR`,
-  and HLG gets `- SDR` views only.
+- 35 view colorspaces: the 7 looks (Standard, Arriba, Sylvan, Colorful,
+  Aery, Dystopic, Umbra) x 5 display encodings (sRGB 2.2-power, Display P3
+  2.2-power, Rec.1886, Rec.2100-PQ @1000 nits, Rec.2100-HLG), each a plain
+  colorspace whose chain ends at its display-encoded cube.
+
+Wiring follows gripeyes/authored-DRTs (the pattern validated working in
+Blender 5.2's OCIO by the user): each OpenDRT view is a colorspace whose
+`from_scene_reference` is exactly `[CST(ACES2065-1 -> T-LogE), cube]`, with
+the cube carrying the complete display transform and nothing after it. The
+Rec.2020 display has no OpenDRT views (the DCTL has no matching SDR preset).
 
 ## Install for the Blender flatpak
 
@@ -68,20 +71,20 @@ on flatpak should keep their own configs. To revert:
 flatpak override --user --unset-env=OCIO --unset-filesystem=/home/zicklag/.local/share/OpenColorIO org.blender.Blender
 ```
 
-## Validation (40-validate.py prints the current numbers)
-
 - v1.1.0 Standard bake, 64pt, vs gripeyes' fully independent bake of the
   same release DCTL: max|delta| ~5e-6 over 262k samples. This pins the whole
-  pipeline end to end.
+  bake pipeline end to end.
 - spot values through the assembled config vs straight through the bake exe:
-  max ~6e-4 (cube interpolation vs exact lattice); grey axis perfectly neutral.
-- frame convention: jedypod's v1.0.0 config gamut matrices, pushed through
-  the D65-white diagonal, reproduce Blender's own E-Gamut(v1) colorspace
-  matrix to ~5e-8 — the construction our spliced matrix follows.
+  max ~3.5e-4 (cube interpolation vs exact lattice); grey axis perfectly
+  neutral.
+- white map: ACES reference white -> E-Gamut 2 white exactly, through the
+  spliced BFD-legend (as gripeyes' config uses).
+- neutral greys through every covered display encoding's full chain
+  (sRGB, P3, Rec.1886, PQ, HLG): channel spread <= 2.6e-6.
 - ociogen-generated T-LogE spi1d vs Jed's shipped one: identical.
-- v1.0 48pt bakes vs Jed's shipped v1.0.0 cubes: ~5e-2 max in chromatic mids.
-  Soft gate: his shipped v1.0.0 cubes pre/succeed the released v1.0.0 DCTL
-  slightly; the v1.1 gate above is the hard one.
+- v1.0 48pt bakes vs Jed's shipped v1.0.0 cubes: ~5e-2 max in chromatic
+  mids. Soft gate: his shipped v1.0.0 cubes pre/succeed the released
+  v1.0.0 DCTL slightly; the v1.1 gate above is the hard one.
 
 ## Notes
 
@@ -95,15 +98,16 @@ flatpak override --user --unset-env=OCIO --unset-filesystem=/home/zicklag/.local
   frame. They differ exactly by the D65-white diagonal. The community
   Blender patch of OpenDRT 1.0 folds the white adapt into its matrix
   constants, so its printed numbers differ from ours for the same mapping.
-- **Grid**: 48pt cubes (Jed's own OCIO config style). `--size 64` bakes
-  finer grids at ~4x the bytes.
-- **Other looks/encodings**: all of the DCTL's nine display encodings
-  (srgb, displayp3, p3d60, p3dci, xyz, HLG, Dolby PQ) can be baked ad hoc,
-  e.g. `pixi run python scripts/20-bake-luts.py --look Sylvan --display xyz
-  --out build/luts/xyz.cube`. Note the DCTL's `displayp3` preset is
-  2.2-power, which does not match Blender's sRGB-piecewise Display P3
-  colorspace — that is why the default set uses rec1886 cubes for the P3
-  display, exactly like the community Blender integration.
+- **Grid**: 64pt cubes, matching gripeyes' published bakes (the hard
+  fidelity gate). `--size 48` bakes Jed's v1.0-config grid at 4x-fewer
+  bytes if wanted.
+- **Other looks/encodings**: the DCTL's remaining display presets (p3d60,
+  p3dci, xyz, Dolby PQ) can be baked ad hoc, e.g. `pixi run python
+  scripts/20-bake-luts.py --look Sylvan --display xyz --out
+  build/luts/xyz.cube`. The srgb/displayp3 presets are pure 2.2-power
+  encodings while Blender's sRGB/P3 display colorspaces use the piecewise
+  sRGB curve; they agree closely except in deep shadows, and rec1886/PQ/HLG
+  match Blender's displays exactly.
 - **Licenses**: the OpenDRT DCTL is GPL-3.0; the LUT files Jed's own config
   zips distribute carry an MIT grant (see LICENSE.md in his zip); the
   ociogen source (bundled, vendored) is MIT. This workspace exists for

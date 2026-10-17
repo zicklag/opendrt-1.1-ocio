@@ -56,20 +56,22 @@ SPI1D = (ROOT / "external/OpenDRT_v1.0.0_full-config_v2/transfer_functions/"
 # generic; validation output is named through LOOKS.
 LOOKS = ["Standard", "Arriba", "Sylvan", "Colorful", "Aery", "Dystopic", "Umbra"]
 
-# Production display encodings — only the two the Blender drop-in uses:
-# rec1886 (2.4-power; used for EVERY SDR display — sRGB, Display P3,
-# Rec.1886, Rec.2020 — since Blender's own display colorspaces do the final
-# encoding; the recipe the community Blender integration of OpenDRT 1.0
-# ships) and rec2100-pq at 1000 nits for HDR. The DCTL's other seven display
-# presets (srgb, displayp3-2.2-power, p3d60, p3dci, xyz, HLG, Dolby PQ) can
-# be baked ad hoc with --display/--set; note the DCTL's "displayp3" is
-# 2.2-power, which does NOT match Blender's sRGB-piecewise Display P3
-# colorspace — hence it is not in the default set.
+# Display encodings for the drop-in config, following the gripeyes/
+# authored-DRTs recipe that is proven working in Blender 5.2: every OpenDRT
+# cube is a complete display transform (encoding included), wired as a plain
+# colorspace view that ends at the cube, so each covered Blender display
+# family bakes its own cubes. Rec.2020 display is skipped: the DCTL has no
+# Rec.2020-primaries SDR preset. Note the DCTL's srgb/displayp3 presets are
+# pure 2.2-power encodings while Blender's sRGB/P3 displays use the piecewise
+# sRGB curve (they agree closely except in deep shadows; rec1886 is exact).
 DISPLAYS = {
     "rec1886": {"display_encoding_preset": "rec1886", "tn_Lp": 100.0},
+    "srgb": {"display_encoding_preset": "srgb", "tn_Lp": 100.0},
+    "displayp3": {"display_encoding_preset": "displayp3", "tn_Lp": 100.0},
     "rec2100-pq": {"display_encoding_preset": "rec2100pq", "tn_Lp": 1000.0},
+    "rec2100-hlg": {"display_encoding_preset": "rec2100hlg", "tn_Lp": 1000.0},
 }
-SIZE = 48
+SIZE = 64
 INPUT_MODE = "tlog-spi1d"
 
 # --------------------------------------------------------------------------
