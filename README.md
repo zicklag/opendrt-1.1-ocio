@@ -54,6 +54,29 @@ Blender 5.2's OCIO by the user): each OpenDRT view is a colorspace whose
 the cube carrying the complete display transform and nothing after it. The
 Rec.2020 display has no OpenDRT views (the DCTL has no matching SDR preset).
 
+The view chains assume Blender's untouched core roles (`scene_linear` =
+Linear Rec.709, reference = ACES2065-1). Don't retag those roles or rename
+the ACES2065-1 / Linear CIE-XYZ D65 colorspaces, or the OpenDRT views will
+resolve to the wrong chains.
+
+## Looks
+
+The seven looks, with the official descriptions from OpenDRT v1.1.0's Nuke
+tool:
+
+| Look | Official description |
+| --- | --- |
+| Standard | Minimal smooth starting look with natural color rendition, Medium Contrast tonescale. |
+| Arriba | Minimal smooth look with slightly stronger saturation and a soft shadow rolloff, in the spirit of camera-maker picture formations. |
+| Sylvan | Smooth starting look with slightly stronger contrast and stronger hue distortions, which may be preferential for skin. |
+| Colorful | Low contrast, saturated, bright look. Might be a good fit for animation. |
+| Aery | Low contrast look with cool highlights; pure colors render bright with strong desaturation near the grey axis. |
+| Dystopic | High contrast look with very low saturation and filmish hue distortions — renders notably dark/cool by design. |
+| Umbra | Dark, moody cinematic look: low shadow contrast, warm whites, cyan blues, dark saturated colors. The DCTL suggests a ~200 nits display peak for it. |
+
+Every look is wired as a view on all five covered display families; the view
+name is the look name (the display context disambiguates).
+
 ## Install for the Blender flatpak
 
 ```
@@ -108,6 +131,19 @@ flatpak override --user --unset-env=OCIO --unset-filesystem=/home/zicklag/.local
   encodings while Blender's sRGB/P3 display colorspaces use the piecewise
   sRGB curve; they agree closely except in deep shadows, and rec1886/PQ/HLG
   match Blender's displays exactly.
+- **gripeyes' cubes use different encoding choices on sRGB/P3**: their
+  published Standard sRGB-display cube is provably the Rec.1886 bake
+  re-encoded at pure 2.2 power (matches my rec1886 cube to 3e-6 through that
+  composition), and their Display-P3 cube is yet another recipe. Ours follow
+  the DCTL's own srgb/displayp3 presets. The two styles differ by at most
+  ~0.04 code values in the deepest shadows; neutrals and mids agree. Use
+  gripeyes' own files instead if you prefer their exact encoding style.
+- **HDR**: PQ cubes target 1000 nits (the DCTL's tn_Lp); HLG uses the DCTL's
+  "Rec.2020 (P3 Limited)" gamut, so content outside P3 under HLG clips
+  against Blender's full-Rec.2020 HLG display definition. No cross-reference
+  exists for HDR — gripeyes publishes SDR only — so the PQ/HLG encodings are
+  validated only against the bake exe and neutrality, not an independent
+  bake.
 - **Licenses**: the OpenDRT DCTL is GPL-3.0; the LUT files Jed's own config
   zips distribute carry an MIT grant (see LICENSE.md in his zip); the
   ociogen source (bundled, vendored) is MIT. This workspace exists for

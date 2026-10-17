@@ -116,7 +116,7 @@ Aery, Dystopic, Umbra) work:
    cubes.
 2. Rewrite the config generator: BFD leg, plain gamut matrix, to-scene-only
 
-## Resolution (2026-10-17, later same day)
+## Resolution (2026-10-17, CONFIRMED by the user)
 
 The rewire described above is implemented and validated:
 
@@ -137,7 +137,7 @@ The rewire described above is implemented and validated:
    "dark moody cinematic" — part of the dark/blue character you saw is by
    design; the green cast was the config bug.
 
-## Install steps for the fresh build
+## Install steps (used for the confirmed build)
 
 ```
 cp -r dist/OpenDRT-1.1-Blender5.2 ~/.local/share/OpenColorIO/
@@ -145,7 +145,23 @@ flatpak override --user --filesystem=/home/zicklag/.local/share/OpenColorIO org.
 flatpak override --user --env=OCIO=/home/zicklag/.local/share/OpenColorIO/OpenDRT-1.1-Blender5.2/config.ocio org.blender.Blender
 ```
 Then fully quit Blender (background-resident, not just window-closed) and
-relaunch. If a cast somehow persists with this build, the remaining variable
-is the DCTL-baked cube set itself, and the next diagnostic is pointing one
-test view at gripeyes' published Standard cube directly inside my dist
-config.
+relaunch.
+
+## Post-confirmation findings (2026-10-17 evening)
+
+- **Equivalence with gripeyes' bake**: Standard→Rec.1886 is identical
+  (5.4e-6 grid-to-grid, the pre-existing gate). Extended verification: their
+  published Standard sRGB-display cube is provably the Rec.1886 bake
+  re-encoded at 2.2 power (3e-6 through that composition); their
+  Display-P3 cube is a third recipe. Ours follow the DCTL's own presets for
+  every display. Documented in the README's Notes.
+- **Mechanism note**: the exact OCIO 2.5.0 behavior that greened the old
+  view_transform wiring was never isolated; the colorspace-view wiring with
+  display-encoded cubes is the empirically proven fix. Both gripeyes' and
+  our config now share that structure plus the same BFD+matrix leg, which
+  is almost certainly why both render identically.
+- Blender's OCIO library could not be tested directly from this machine
+  (no PyOpenColorIO 2.5.0 wheel is published; conda-forge has no 2.5.0
+  either; Blender's bundled lib is inaccessible from the session sandbox),
+  which is why validation runs on OCIO 2.6.0 and the final say was the
+  user's render test.
